@@ -1,6 +1,6 @@
 // backend/routes.js
 const express = require('express');
-const ScrapedData = require('./mongoConfig');
+const ScrapedData = require('./models/ScrapedData'); // Import the ScrapedData model
 const { scrapeData } = require('./scraper');
 
 const router = express.Router();
