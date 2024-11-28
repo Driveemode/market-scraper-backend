@@ -8,6 +8,7 @@ const mongoose = require('mongoose');
 const routes = require('./routes');
 const ScrapedData = require('./models/ScrapedData'); // Import the ScrapedData model
 const Bottleneck = require('bottleneck');
+const { ChartJSNodeCanvas } = require('chartjs-node-canvas');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -31,6 +32,92 @@ const productSchema = new mongoose.Schema({
   scrapedAt: { type: Date, default: Date.now },
 });
 const Product = mongoose.model('Product', productSchema);
+// Chart Configuration
+const width = 800; // Chart width
+const height = 600; // Chart height
+const chartJSNodeCanvas = new ChartJSNodeCanvas({ width, height });
+
+// Helper Function: Clean Data
+const cleanData = (products) => {
+  return products.map((product) => ({
+    ...product,
+    price: parseFloat(product.price.replace(/₹|,/g, '')) || 0, // Convert ₹12,999 to 12999
+    discount: parseFloat(product.discount.replace('%', '')) || 0, // Convert 10% to 10
+  }));
+};
+
+// Helper Function: Analyze Data
+const analyzeData = (products) => {
+  const totalProducts = products.length;
+  const totalPrice = products.reduce((sum, product) => sum + product.price, 0);
+  const averagePrice = (totalPrice / totalProducts).toFixed(2);
+
+  const vendorCounts = {};
+  products.forEach((product) => {
+    product.vendors.forEach((vendor) => {
+      vendorCounts[vendor] = (vendorCounts[vendor] || 0) + 1;
+    });
+  });
+
+  const topVendors = Object.entries(vendorCounts)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5);
+
+  return { averagePrice, topVendors };
+};
+
+// Endpoint: Fetch Data and Generate Visualization
+app.get('/api/visualization', async (req, res) => {
+  try {
+    // Fetch Data
+    const products = await Product.find();
+    const cleanedProducts = cleanData(products);
+
+    // Analyze Data
+    const { averagePrice, topVendors } = analyzeData(cleanedProducts);
+
+    // Generate Visualization
+    const chartData = {
+      labels: topVendors.map((v) => v[0]), // Vendor names
+      datasets: [
+        {
+          label: 'Top Vendors by Product Count',
+          data: topVendors.map((v) => v[1]), // Product counts
+          backgroundColor: 'rgba(54, 162, 235, 0.2)',
+          borderColor: 'rgba(54, 162, 235, 1)',
+          borderWidth: 1,
+        },
+      ],
+    };
+
+    const chartConfiguration = {
+      type: 'bar',
+      data: chartData,
+      options: {
+        plugins: {
+          title: {
+            display: true,
+            text: `Average Price: ₹${averagePrice}`,
+          },
+        },
+        scales: {
+          y: {
+            beginAtZero: true,
+          },
+        },
+      },
+    };
+
+    const image = await chartJSNodeCanvas.renderToBuffer(chartConfiguration);
+
+    // Send Chart as Response
+    res.set('Content-Type', 'image/png');
+    res.send(image);
+  } catch (error) {
+    console.error('Error generating visualization:', error.message);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
 const saveProduct = async (product) => {
   try {
     const existingProduct = await Product.findOne({ name: product.name, url: product.url });
