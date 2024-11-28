@@ -57,7 +57,7 @@ app.post('/api/scrape', async (req, res) => {
     }
 });
 app.post('/api/scrape-ecom-cheerio', async (req, res) => {
-  const { url, method } = req.body;
+  const { url, site } = req.body;
   // try {
   //     const data = await scrapeData(url, fields, method);
   //     console.log("Received data : ", JSON.stringify(data));
