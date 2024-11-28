@@ -1,5 +1,7 @@
 // backend/index.js
 require('dotenv').config();
+const axios = require('axios');
+const cheerio = require('cheerio');
 const express = require('express');
 const cors = require('cors');
 const mongoose = require('mongoose');
