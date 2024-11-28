@@ -7,9 +7,13 @@ const cors = require('cors');
 const mongoose = require('mongoose');
 const routes = require('./routes');
 const ScrapedData = require('./models/ScrapedData'); // Import the ScrapedData model
+const Bottleneck = require('bottleneck');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const limiter = new Bottleneck({
+  minTime: 1000, // 1 second between requests
+});
 
 // Connect to MongoDB
 mongoose.connect("mongodb://172.17.0.2:27017/market_scraper", {
@@ -71,6 +75,12 @@ app.post('/api/scrape-ecom-cheerio', async (req, res) => {
   //     res.status(500).json({ message: 'Error scraping data', error });
   // }
   try {
+    const headers = {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36',
+      'Accept-Language': 'en-US,en;q=0.9',
+      'Accept-Encoding': 'gzip, deflate, br',
+      'Connection': 'keep-alive',
+    };
     const { data } = await axios.get(url);
     const $ = cheerio.load(data);
 
