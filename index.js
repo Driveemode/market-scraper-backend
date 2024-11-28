@@ -81,7 +81,8 @@ app.post('/api/scrape-ecom-cheerio', async (req, res) => {
       'Accept-Encoding': 'gzip, deflate, br',
       'Connection': 'keep-alive',
     };
-    const { data } = await axios.get(url);
+    const proxyUrl = `http://api.scraperapi.com?api_key=8dcef76ad04710bd64b4362e9ded6185&url=https://www.amazon.in/s?k=laptops`;
+    const { data } = await axios.get(proxyUrl);
     const $ = cheerio.load(data);
 
     // Example for extracting Amazon-like or Flipkart-like data
