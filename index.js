@@ -15,13 +15,21 @@ const PORT = process.env.PORT || 3000;
 const limiter = new Bottleneck({
   minTime: 1000, // 1 second between requests
 });
+var productsLocal = [];
+var products = [];
 
 // Connect to MongoDB
-mongoose.connect("mongodb://172.17.0.2:27017/market_scraper", {
+mongoose.connect("mongodb://localhost:27017/market_scraper", {
     useNewUrlParser: true,
     useUnifiedTopology: true
 }).then(() => console.log('MongoDB connected'))
   .catch(err => console.error(err));
+// Configure CORS
+app.use(cors({
+  origin: 'http://localhost:3001', // Replace with your frontend URL
+  methods: 'GET,POST,PUT,DELETE',
+  allowedHeaders: 'Content-Type,Authorization'
+}));
 const productSchema = new mongoose.Schema({
   name: String,
   price: String,
@@ -48,22 +56,28 @@ const cleanData = (products) => {
 
 // Helper Function: Analyze Data
 const analyzeData = (products) => {
-  const totalProducts = products.length;
-  const totalPrice = products.reduce((sum, product) => sum + product.price, 0);
-  const averagePrice = (totalPrice / totalProducts).toFixed(2);
+  const averagePrice = products.reduce((sum, product) => sum + product.price, 0) / products.length;
 
-  const vendorCounts = {};
-  products.forEach((product) => {
-    product.vendors.forEach((vendor) => {
-      vendorCounts[vendor] = (vendorCounts[vendor] || 0) + 1;
-    });
-  });
+  const vendorCounts = products.reduce((counts, product) => {
+    counts[product.vendor] = (counts[product.vendor] || 0) + 1;
+    return counts;
+  }, {});
 
-  const topVendors = Object.entries(vendorCounts)
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 5);
+  const categoryCounts = products.reduce((counts, product) => {
+    counts[product.category] = (counts[product.category] || 0) + 1;
+    return counts;
+  }, {});
 
-  return { averagePrice, topVendors };
+  const priceDistribution = products.reduce((distribution, product) => {
+    const priceRange = Math.floor(product.price / 10) * 10;
+    distribution[priceRange] = (distribution[priceRange] || 0) + 1;
+    return distribution;
+  }, {});
+
+  const topVendors = Object.entries(vendorCounts).sort((a, b) => b[1] - a[1]).slice(0, 10);
+  const topCategories = Object.entries(categoryCounts).sort((a, b) => b[1] - a[1]).slice(0, 10);
+
+  return { averagePrice, topVendors, topCategories, priceDistribution };
 };
 
 // Endpoint: Fetch Data and Generate Visualization
@@ -71,13 +85,21 @@ app.get('/api/visualization', async (req, res) => {
   try {
     // Fetch Data
     const products = await Product.find();
+    console.log("Fetched products:", products);
+
+    // Clean Data
     const cleanedProducts = cleanData(products);
+    console.log("Cleaned products:", cleanedProducts);
 
     // Analyze Data
-    const { averagePrice, topVendors } = analyzeData(cleanedProducts);
+    const { averagePrice, topVendors, topCategories, priceDistribution } = analyzeData(cleanedProducts);
+    console.log("Average Price:", averagePrice);
+    console.log("Top Vendors:", topVendors);
+    console.log("Top Categories:", topCategories);
+    console.log("Price Distribution:", priceDistribution);
 
-    // Generate Visualization
-    const chartData = {
+    // Generate Visualizations
+    const vendorChartData = {
       labels: topVendors.map((v) => v[0]), // Vendor names
       datasets: [
         {
@@ -90,32 +112,36 @@ app.get('/api/visualization', async (req, res) => {
       ],
     };
 
-    const chartConfiguration = {
-      type: 'bar',
-      data: chartData,
-      options: {
-        plugins: {
-          title: {
-            display: true,
-            text: `Average Price: ₹${averagePrice}`,
-          },
+    const categoryChartData = {
+      labels: topCategories.map((c) => c[0]), // Category names
+      datasets: [
+        {
+          label: 'Top Categories by Product Count',
+          data: topCategories.map((c) => c[1]), // Product counts
+          backgroundColor: 'rgba(75, 192, 192, 0.2)',
+          borderColor: 'rgba(75, 192, 192, 1)',
+          borderWidth: 1,
         },
-        scales: {
-          y: {
-            beginAtZero: true,
-          },
-        },
-      },
+      ],
     };
 
-    const image = await chartJSNodeCanvas.renderToBuffer(chartConfiguration);
+    const priceDistributionChartData = {
+      labels: Object.keys(priceDistribution), // Price ranges
+      datasets: [
+        {
+          label: 'Price Distribution',
+          data: Object.values(priceDistribution), // Product counts
+          backgroundColor: 'rgba(153, 102, 255, 0.2)',
+          borderColor: 'rgba(153, 102, 255, 1)',
+          borderWidth: 1,
+        },
+      ],
+    };
 
-    // Send Chart as Response
-    res.set('Content-Type', 'image/png');
-    res.send(image);
+    res.status(200).json({ vendorChartData, categoryChartData, priceDistributionChartData, averagePrice });
   } catch (error) {
-    console.error('Error generating visualization:', error.message);
-    res.status(500).json({ error: 'Internal Server Error' });
+    console.error('Error generating visualization:', error);
+    res.status(500).json({ error: error.message });
   }
 });
 const saveProduct = async (product) => {
@@ -150,7 +176,8 @@ app.post('/api/scrape', async (req, res) => {
     }
 });
 app.post('/api/scrape-ecom-cheerio', async (req, res) => {
-  const { url, site } = req.body;
+  var { url, receivedSite } = req.body;
+  console.log("scrape-ecom-cheerio received : ", req.body);
   // try {
   //     const data = await scrapeData(url, fields, method);
   //     console.log("Received data : ", JSON.stringify(data));
@@ -168,12 +195,13 @@ app.post('/api/scrape-ecom-cheerio', async (req, res) => {
       'Accept-Encoding': 'gzip, deflate, br',
       'Connection': 'keep-alive',
     };
-    const proxyUrl = `http://api.scraperapi.com?api_key=8dcef76ad04710bd64b4362e9ded6185&url=https://www.amazon.in/s?k=laptops`;
+    const proxyUrl = `http://api.scraperapi.com?api_key=8dcef76ad04710bd64b4362e9ded6185&url=`+url;
+    const site = receivedSite;
     const { data } = await axios.get(proxyUrl);
     const $ = cheerio.load(data);
 
     // Example for extracting Amazon-like or Flipkart-like data
-    const products = [];
+    products = [];
     $('div.s-main-slot > div.s-result-item').each((index, element) => {
       const name = $(element).find('h2.a-size-mini > a.a-link-normal').text().trim();
       const price = $(element).find('span.a-price > span.a-offscreen').text().trim();
@@ -183,18 +211,20 @@ app.post('/api/scrape-ecom-cheerio', async (req, res) => {
   
       products.push({ name, price, description, discount, vendor });
     });
-
+    productsLocal = products;
     for (const product of products) {
       await saveProduct(product);
     }
-    res.status(200).json({ message: 'Data scraped and saved', data });
+    res.status(200).json({ message: 'Data scraped and saved', products });
 
-    console.log(`Scraped ${products.length} products from ${site}`);
+    console.log(`Scraped ${products.length} products from ${receivedSite}`);
   } catch (error) {
     console.error(`Error scraping ${site}: ${error.message}`);
     res.status(500).json({ message: 'Error scraping data', error });
   }
 });
+
+
 
 app.listen(PORT, () => {
     console.log(`Server is running on http://localhost:${PORT}`);
