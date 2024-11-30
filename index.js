@@ -37,10 +37,14 @@ app.use(
 const productSchema = new mongoose.Schema({
   name: String,
   price: String,
+  originalPrice: String,
   description: String,
   discount: String,
   reviews: String,
   rating: String,
+  availability: String,
+  badge: String,
+  image: String,
   vendors: [String],
   url: String,
   scrapedAt: { type: Date, default: Date.now },
@@ -202,6 +206,7 @@ app.post("/api/scrape-ecom-cheerio", async (req, res) => {
   console.log("Scraping data obj ", req.body);
   if (site !== "All" && site !== undefined) {
     console.log("Scraping data from ", site);
+    const scraperApiKey = "8dcef76ad04710bd64b4362e9ded6185";
     try {
       const headers = {
         "User-Agent":
@@ -210,45 +215,71 @@ app.post("/api/scrape-ecom-cheerio", async (req, res) => {
         "Accept-Encoding": "gzip, deflate, br",
         Connection: "keep-alive",
       };
-      const proxyUrl =
-        `http://api.scraperapi.com?api_key=8dcef76ad04710bd64b4362e9ded6185&url=` +
-        url;
-      const { data } = await axios.get(proxyUrl, { headers });
-      const $ = cheerio.load(data);
-
-      // Example for extracting Amazon-like or Flipkart-like data
+      // const proxyUrl =
+      //   `http://api.scraperapi.com?api_key=8dcef76ad04710bd64b4362e9ded6185&url=` +
+      //   url;
+      // const { data } = await axios.get(proxyUrl, { headers });
+      // const $ = cheerio.load(data);
+      const siteConfigs = [
+        walmartConfig,
+        amazonUSConfig,
+        bestBuyConfig,
+        aliExpressConfig,
+      ];
       const products = [];
-      $("div.s-main-slot > div.s-result-item").each((_, element) => {
-        const name = $(element)
-          .find("h2.a-size-mini > a.a-link-normal")
-          .text()
-          .trim();
-        const price = $(element)
-          .find("span.a-price > span.a-offscreen")
-          .text()
-          .trim();
-        const description = $(element)
-          .find("div.a-row.a-size-base.a-color-secondary")
-          .text()
-          .trim();
-        const discount = $(element)
-          .find("span.savingsPercentage")
-          .text()
-          .trim();
-        const vendor = $(element)
-          .find("span.a-size-base-plus.a-color-base")
-          .text()
-          .trim();
+      for (const config of siteConfigs) {
+        if(site === config.siteName){
+          console.log(`Scraping ${config.siteName}...`);
+          const siteResults = await scrapeWebsite(config.url, config, scraperApiKey);
+          products.push(...siteResults);
+        }
+      }
+      // const siteResults = await scrapeWebsite(
+      //   config.url,
+      //   config,
+      //   scraperApiKey
+      // );
+      // products.push(...siteResults);
 
-        products.push({ name, price, description, discount, vendor });
-      });
+      // // Example for extracting Amazon-like or Flipkart-like data
+      // $("div.s-main-slot > div.s-result-item").each((_, element) => {
+      //   const name = $(element)
+      //     .find("h2.a-size-mini > a.a-link-normal")
+      //     .text()
+      //     .trim();
+      //   const price = $(element)
+      //     .find("span.a-price > span.a-offscreen")
+      //     .text()
+      //     .trim();
+      //   const description = $(element)
+      //     .find("div.a-row.a-size-base.a-color-secondary")
+      //     .text()
+      //     .trim();
+      //   const discount = $(element)
+      //     .find("span.savingsPercentage")
+      //     .text()
+      //     .trim();
+      //   const vendor = $(element)
+      //     .find("span.a-size-base-plus.a-color-base")
+      //     .text()
+      //     .trim();
 
-      productsLocal = products;
+      //   products.push({ name, price, description, discount, vendor });
+      // });
+
+      // productsLocal = products;
+      // for (const product of products) {
+      //   await saveProduct(product);
+      // }
+      // Save to MongoDB
       for (const product of products) {
-        await saveProduct(product);
+        try {
+          await Product.create(product);
+        } catch (err) {
+          console.error(`Failed to save product: ${err.message}`);
+        }
       }
       res.status(200).json({ message: "Data scraped and saved", products });
-
       console.log(`Scraped ${products.length} products from ${site}`);
     } catch (error) {
       console.error(`Error scraping ${site}: ${error.message}`);
@@ -300,6 +331,47 @@ app.post("/api/scrape-ecom-cheerio", async (req, res) => {
 
 // const axios = require('axios');
 // const cheerio = require('cheerio');
+// const walmartConfig = {
+//   siteName: "Walmart",
+//   url: "https://www.walmart.com/search/?query=laptop",
+//   containerSelector: "div.search-result-gridview-item",
+//   nameSelector: "a.product-title-link > span",
+//   priceSelector: "span.price-main > span.visuallyhidden",
+//   ratingSelector: "span.stars-reviews-count > span",
+//   reviewsSelector: "span.stars-reviews-count > span",
+//   vendorSelector: "div.sold-by > span",
+//   discountSelector: "", // Walmart typically doesn't show explicit discounts
+// };
+// // const amazonUSConfig = {
+// //   siteName: "Amazon US",
+// //   url: "https://www.amazon.com/s?k=laptop",
+// //   containerSelector: "div.s-main-slot > div.s-result-item",
+// //   nameSelector: "h2.a-size-mini > a",
+// //   priceSelector: "span.a-price > span.a-offscreen",
+// //   ratingSelector: "span.a-icon-alt",
+// //   reviewsSelector: "span.a-size-base",
+// //   vendorSelector: "", // Not available on listing pages
+// //   discountSelector: "", // Not available on listing pages
+// // };
+
+// const amazonUSConfig = {
+//   siteName: "Amazon",
+//   url: "https://www.amazon.com/s?k=laptop",
+//   containerSelector: "div.s-main-slot > div.s-result-item",
+
+//   // Updated Selectors
+//   nameSelector: "h2.a-size-mini > a > span", // Target the inner span for product name
+//   priceSelector: "span.a-price > span.a-offscreen", // Scrape displayed price
+//   originalPriceSelector: "span.a-price.a-text-price > span.a-offscreen", // For original price (if discounted)
+//   ratingSelector: "span.a-icon-alt", // Extract star ratings
+//   reviewsSelector: "span.a-size-base", // Extract the number of reviews
+//   vendorSelector: "span.s-line-clamp-1 > a", // Vendor or brand name (if available)
+//   discountSelector: "", // Amazon doesn't provide explicit discounts; calculate using price and original price
+//   availabilitySelector: "span.a-size-small.a-color-base", // Stock/availability details
+//   badgeSelector: "span.s-badge-text", // Extract badges like "Amazon's Choice" or "Best Seller"
+//   imageSelector: "img.s-image", // Extract product image URL for visual analysis
+// };
+
 const walmartConfig = {
   siteName: "Walmart",
   url: "https://www.walmart.com/search/?query=laptop",
@@ -309,19 +381,25 @@ const walmartConfig = {
   ratingSelector: "span.stars-reviews-count > span",
   reviewsSelector: "span.stars-reviews-count > span",
   vendorSelector: "div.sold-by > span",
-  discountSelector: "", // Walmart typically doesn't show explicit discounts
+  paginationParam: "&page=", // Pagination logic
+  render: false, // No need to render JS
 };
+
 const amazonUSConfig = {
-  siteName: "Amazon US",
+  siteName: "Amazon",
   url: "https://www.amazon.com/s?k=laptop",
   containerSelector: "div.s-main-slot > div.s-result-item",
-  nameSelector: "h2.a-size-mini > a",
+  nameSelector: "h2.a-size-mini > a > span",
   priceSelector: "span.a-price > span.a-offscreen",
+  originalPriceSelector: "span.a-price.a-text-price > span.a-offscreen",
   ratingSelector: "span.a-icon-alt",
   reviewsSelector: "span.a-size-base",
-  vendorSelector: "", // Not available on listing pages
-  discountSelector: "", // Not available on listing pages
+  vendorSelector: "span.s-line-clamp-1 > a",
+  paginationParam: "&page=", // Pagination logic
+  render: true, // Needs JS rendering
 };
+
+
 const bestBuyConfig = {
   siteName: "Best Buy",
   url: "https://www.bestbuy.com/site/searchpage.jsp?st=laptop",
@@ -375,61 +453,260 @@ const scrapeSites = async (req, res) => {
 
 app.get("/api/scrape-all", scrapeSites);
 
+// const scrapeWebsite = async (url, siteConfig, scraperApiKey) => {
+//   try {
+//     // const response = await axios.get("http://api.scraperapi.com", {
+//     //   params: {
+//     //     api_key: scraperApiKey,
+//     //     url,
+//     //   },
+//     // });
+
+//     // const $ = cheerio.load(response.data);
+//     const headers = {
+//       "User-Agent":
+//         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36",
+//       "Accept-Language": "en-US,en;q=0.9",
+//       "Accept-Encoding": "gzip, deflate, br",
+//       Connection: "keep-alive",
+//     };
+    
+//     const receivedSite = siteConfig.siteName;
+//     const products = [];
+    
+//     for (let page = 1; page <= 5; page++) {
+//       // const url = `https://www.amazon.com/s?k=laptop&page=${page}`;
+//       const proxyUrl =
+//       `http://api.scraperapi.com?api_key=8dcef76ad04710bd64b4362e9ded6185&url=` +
+//       url+"&page="+page;
+//       // Scrape data for this URL
+//       const { data } = await axios.get(proxyUrl);
+//     const $ = cheerio.load(data);
+//     $("div.s-main-slot > div.s-result-item").each((_, element) => {
+//       const name = $(element).find("h2.a-size-mini > a.a-link-normal").text().trim();
+//       const price = $(element).find("span.a-price > span.a-offscreen").text().trim();
+//       const originalPrice = $(element).find("span.a-price.a-text-price > span.a-offscreen").text().trim();
+//       const description = $(element).find("div.a-row.a-size-base.a-color-secondary").text().trim();
+//       const discount = $(element).find("span.savingsPercentage").text().trim();
+//       const vendor = $(element).find("span.a-size-base-plus.a-color-base").text().trim();
+//       const rating = $(element).find("span.a-icon-alt").text().trim();
+//       const reviews = $(element).find("span.a-size-small > span.a-size-base").text().trim();
+//       const availability = $(element).find("span.a-size-small.a-color-base").text().trim();
+//       const badge = $(element).find("span.s-badge-text").text().trim();
+//       const image = $(element).find("img.s-image").attr("src");
+//       products.push({ name, price, originalPrice, description, discount, vendor, rating, reviews, availability, badge, image });
+//     });
+//     }
+
+//     // $(siteConfig.containerSelector).each((index, element) => {
+//     //   const name = $(element).find(siteConfig.nameSelector).text().trim();
+//     //   const price = $(element).find(siteConfig.priceSelector).text().trim();
+//     //   const rating = $(element).find(siteConfig.ratingSelector).text().trim();
+//     //   const reviews = $(element).find(siteConfig.reviewsSelector).text().trim();
+//     //   const vendor = $(element).find(siteConfig.vendorSelector).text().trim();
+//     //   const discount = $(element)
+//     //     .find(siteConfig.discountSelector)
+//     //     .text()
+//     //     .trim();
+
+//     //   if (name && price) {
+//     //     products.push({
+//     //       name,
+//     //       price,
+//     //       rating,
+//     //       reviews,
+//     //       vendor,
+//     //       discount,
+//     //       site: siteConfig.siteName,
+//     //     });
+//     //   }
+//     // });
+//     return products;
+//   } catch (error) {
+//     console.error(`Error scraping ${siteConfig.siteName}: ${error.message}`);
+//     return [];
+//   }
+// };
+// const scrapeWebsite = async (url, siteConfig, scraperApiKey) => {
+//   const products = [];
+//   const maxRetries = 5;
+
+//   for (let page = 1; page <= 5; page++) {
+//     const proxyUrl = `http://api.scraperapi.com?api_key=${scraperApiKey}&url=${url}&render=true&proxy_type=residential&page=${page}`;
+
+//     for (let attempt = 1; attempt <= maxRetries; attempt++) {
+//       try {
+//         const { data } = await axios.get(proxyUrl);
+//         const $ = cheerio.load(data);
+
+//         $("div.s-main-slot > div.s-result-item").each((_, element) => {
+//           const name = $(element).find("h2.a-size-mini > a.a-link-normal").text().trim();
+//           const price = $(element).find("span.a-price > span.a-offscreen").text().trim();
+//           const originalPrice = $(element).find("span.a-price.a-text-price > span.a-offscreen").text().trim();
+//           const description = $(element).find("div.a-row.a-size-base.a-color-secondary").text().trim();
+//           const discount = $(element).find("span.savingsPercentage").text().trim();
+//           const vendor = $(element).find("span.a-size-base-plus.a-color-base").text().trim();
+//           const rating = $(element).find("span.a-icon-alt").text().trim();
+//           const reviews = $(element).find("span.a-size-small > span.a-size-base").text().trim();
+//           const availability = $(element).find("span.a-size-small.a-color-base").text().trim();
+//           const badge = $(element).find("span.s-badge-text").text().trim();
+//           const image = $(element).find("img.s-image").attr("src");
+//           products.push({ name, price, originalPrice, description, discount, vendor, rating, reviews, availability, badge, image });
+//         });
+
+//         break; // Break out of the retry loop if the request is successful
+//       } catch (error) {
+//         if (attempt === maxRetries) {
+//           console.error(`Failed to scrape ${url} after ${maxRetries} attempts: ${error.message}`);
+//         } else {
+//           console.error(`Error scraping ${url} (attempt ${attempt}): ${error.message}`);
+//           await new Promise(resolve => setTimeout(resolve, 1000 * Math.pow(2, attempt))); // Exponential backoff
+//         }
+//       }
+//     }
+//   }
+
+//   return products;
+// };
+
+const userAgents = [
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.0.0 Safari/537.36",
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+  // Add more User-Agents
+];
+
+const getRandomUserAgent = () => userAgents[Math.floor(Math.random() * userAgents.length)];
+
+
 const scrapeWebsite = async (url, siteConfig, scraperApiKey) => {
-  try {
-    // const response = await axios.get("http://api.scraperapi.com", {
-    //   params: {
-    //     api_key: scraperApiKey,
-    //     url,
-    //   },
-    // });
+  const products = [];
+  const maxRetries = 5;
 
-    // const $ = cheerio.load(response.data);
-    const headers = {
-      "User-Agent":
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36",
-      "Accept-Language": "en-US,en;q=0.9",
-      "Accept-Encoding": "gzip, deflate, br",
-      Connection: "keep-alive",
-    };
-    const proxyUrl =
-      `http://api.scraperapi.com?api_key=8dcef76ad04710bd64b4362e9ded6185&url=` +
-      url;
-    const receivedSite = siteConfig.siteName;
-    const { data } = await axios.get(proxyUrl);
-    const $ = cheerio.load(data);
-    const products = [];
+  for (let page = 1; page <= 5; page++) {
+    const paginatedUrl = `${url}&page=${page}`; // Pagination logic
+    const proxyUrl = `http://api.scraperapi.com?api_key=${scraperApiKey}&url=${encodeURIComponent(
+      paginatedUrl
+    )}&render=${siteConfig.render || "false"}`;
 
-    $(siteConfig.containerSelector).each((index, element) => {
-      const name = $(element).find(siteConfig.nameSelector).text().trim();
-      const price = $(element).find(siteConfig.priceSelector).text().trim();
-      const rating = $(element).find(siteConfig.ratingSelector).text().trim();
-      const reviews = $(element).find(siteConfig.reviewsSelector).text().trim();
-      const vendor = $(element).find(siteConfig.vendorSelector).text().trim();
-      const discount = $(element)
-        .find(siteConfig.discountSelector)
-        .text()
-        .trim();
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        // headers: { "User-Agent": getRandomUserAgent() },
+        const { data } = await axios.get(proxyUrl, { headers: getRandomUserAgent() || {} });
+        const $ = cheerio.load(data);
 
-      if (name && price) {
-        products.push({
-          name,
-          price,
-          rating,
-          reviews,
-          vendor,
-          discount,
-          site: siteConfig.siteName,
+        $(siteConfig.containerSelector).each((_, element) => {
+          const name = $(element).find(siteConfig.nameSelector).text().trim();
+          const price = $(element).find(siteConfig.priceSelector).text().trim();
+          const originalPrice = $(element).find(siteConfig.originalPriceSelector || "").text().trim();
+          const description = $(element).find(siteConfig.descriptionSelector || "").text().trim();
+          const discount = $(element).find(siteConfig.discountSelector || "").text().trim();
+          const vendor = $(element).find(siteConfig.vendorSelector || "").text().trim();
+          const rating = $(element).find(siteConfig.ratingSelector || "").text().trim();
+          const reviews = $(element).find(siteConfig.reviewsSelector || "").text().trim();
+          const availability = $(element).find(siteConfig.availabilitySelector || "").text().trim();
+          const badge = $(element).find(siteConfig.badgeSelector || "").text().trim();
+          const image = $(element).find(siteConfig.imageSelector || "").attr("src");
+
+          if (name && price) {
+            products.push({
+              name,
+              price,
+              originalPrice,
+              description,
+              discount,
+              vendor,
+              rating,
+              reviews,
+              availability,
+              badge,
+              image,
+              site: siteConfig.siteName,
+              scrapedAt: new Date(),
+            });
+          }
         });
-      }
-    });
 
-    return products;
-  } catch (error) {
-    console.error(`Error scraping ${siteConfig.siteName}: ${error.message}`);
-    return [];
+        break; // Exit retry loop on success
+      } catch (error) {
+        if (attempt === maxRetries) {
+          console.error(`Failed to scrape ${url} after ${maxRetries} attempts: ${error.message}`);
+        } else {
+          console.error(`Retrying ${url} (attempt ${attempt}): ${error.message}`);
+          await new Promise(resolve => setTimeout(resolve, 1000 * Math.pow(2, attempt))); // Exponential backoff
+        }
+      }
+    }
   }
+
+  return products;
 };
+
+const scrapeWalmart = async (scraperApiKey) => {
+  const walmartConfig = {
+    siteName: "Walmart",
+    url: "https://www.walmart.com/search/?query=laptop",
+    containerSelector: "div.search-result-gridview-item",
+    nameSelector: "a.product-title-link > span",
+    priceSelector: "span.price-main > span.visuallyhidden",
+    originalPriceSelector: "span.price-main > span.strike-through",
+    ratingSelector: "span.stars-reviews-count > span",
+    reviewsSelector: "span.stars-reviews-count > span:last-child",
+    vendorSelector: "div.sold-by > span",
+    badgeSelector: "div.badge > span",
+    imageSelector: "div.search-result-productimage img",
+    availabilitySelector: "div.search-result-availability",
+    paginationParam: "&page=",
+  };
+
+  const products = [];
+  for (let page = 1; page <= 5; page++) {
+    const url = `${walmartConfig.url}${walmartConfig.paginationParam}${page}`;
+    const proxyUrl = `http://api.scraperapi.com?api_key=${scraperApiKey}&url=${encodeURIComponent(
+      url
+    )}&render=${walmartConfig.render}`;
+
+    try {
+      const { data } = await axios.get(proxyUrl);
+      const $ = cheerio.load(data);
+
+      $(walmartConfig.containerSelector).each((_, element) => {
+        const name = $(element).find(walmartConfig.nameSelector).text().trim();
+        const price = $(element).find(walmartConfig.priceSelector).text().trim();
+        const originalPrice = $(element)
+          .find(walmartConfig.originalPriceSelector)
+          .text()
+          .trim();
+        const rating = $(element).find(walmartConfig.ratingSelector).text().trim();
+        const reviews = $(element).find(walmartConfig.reviewsSelector).text().trim();
+        const vendor = $(element).find(walmartConfig.vendorSelector).text().trim();
+        const badge = $(element).find(walmartConfig.badgeSelector).text().trim();
+        const image = $(element).find(walmartConfig.imageSelector).attr("src");
+        const availability = $(element).find(walmartConfig.availabilitySelector).text().trim();
+
+        if (name && price) {
+          products.push({
+            name,
+            price,
+            originalPrice,
+            rating,
+            reviews,
+            vendor,
+            badge,
+            image,
+            availability,
+            site: walmartConfig.siteName,
+          });
+        }
+      });
+    } catch (error) {
+      console.error(`Error scraping Walmart (page ${page}): ${error.message}`);
+    }
+  }
+  return products;
+};
+
+
+
 
 const comparePrices = async () => {
   const products = await Product.find();
