@@ -29,13 +29,11 @@ mongoose
   .then(() => console.log("MongoDB connected"))
   .catch((err) => console.error(err));
 // Configure CORS
-app.use(
-  cors({
-    origin: "http://localhost:3001", // Replace with your frontend URL
-    methods: "GET,POST,PUT,DELETE",
-    allowedHeaders: "Content-Type,Authorization",
-  })
-);
+app.use(cors({
+  origin: 'http://localhost:3001', // Update with your frontend URL
+  methods: 'GET,POST,PUT,DELETE',
+  allowedHeaders: 'Content-Type,Authorization,Cache-Control'
+}));
 const productSchema = new mongoose.Schema({
   name: String,
   price: String,
