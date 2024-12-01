@@ -9,6 +9,8 @@ const routes = require("./routes");
 const ScrapedData = require("./models/ScrapedData"); // Import the ScrapedData model
 const Bottleneck = require("bottleneck");
 const { ChartJSNodeCanvas } = require("chartjs-node-canvas");
+const puppeteer = require('puppeteer');
+// const fetch = require('node-fetch');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -228,10 +230,12 @@ app.post("/api/scrape-ecom-cheerio", async (req, res) => {
       ];
       const products = [];
       for (const config of siteConfigs) {
-        if(site === config.siteName){
+        if(site === config.siteName ){
           console.log(`Scraping ${config.siteName}...`);
-          const siteResults = await scrapeWebsite(config.url, config, scraperApiKey);
+          const siteResults = await scrapeWebsite(url, config, scraperApiKey);
           products.push(...siteResults);
+        }else{
+          // scrapeWalmart(config.url);
         }
       }
       // const siteResults = await scrapeWebsite(
@@ -588,9 +592,11 @@ const scrapeWebsite = async (url, siteConfig, scraperApiKey) => {
       paginatedUrl
     )}&render=${siteConfig.render || "false"}`;
 
+
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
         // headers: { "User-Agent": getRandomUserAgent() },
+        console.log("Final URL being scraped : ", proxyUrl);
         const { data } = await axios.get(proxyUrl, { headers: getRandomUserAgent() || {} });
         const $ = cheerio.load(data);
 
@@ -640,70 +646,128 @@ const scrapeWebsite = async (url, siteConfig, scraperApiKey) => {
 
   return products;
 };
-
-const scrapeWalmart = async (scraperApiKey) => {
-  const walmartConfig = {
-    siteName: "Walmart",
-    url: "https://www.walmart.com/search/?query=laptop",
-    containerSelector: "div.search-result-gridview-item",
-    nameSelector: "a.product-title-link > span",
-    priceSelector: "span.price-main > span.visuallyhidden",
-    originalPriceSelector: "span.price-main > span.strike-through",
-    ratingSelector: "span.stars-reviews-count > span",
-    reviewsSelector: "span.stars-reviews-count > span:last-child",
-    vendorSelector: "div.sold-by > span",
-    badgeSelector: "div.badge > span",
-    imageSelector: "div.search-result-productimage img",
-    availabilitySelector: "div.search-result-availability",
-    paginationParam: "&page=",
-  };
-
-  const products = [];
-  for (let page = 1; page <= 5; page++) {
-    const url = `${walmartConfig.url}${walmartConfig.paginationParam}${page}`;
-    const proxyUrl = `http://api.scraperapi.com?api_key=${scraperApiKey}&url=${encodeURIComponent(
-      url
-    )}&render=${walmartConfig.render}`;
-
-    try {
-      const { data } = await axios.get(proxyUrl);
-      const $ = cheerio.load(data);
-
-      $(walmartConfig.containerSelector).each((_, element) => {
-        const name = $(element).find(walmartConfig.nameSelector).text().trim();
-        const price = $(element).find(walmartConfig.priceSelector).text().trim();
-        const originalPrice = $(element)
-          .find(walmartConfig.originalPriceSelector)
-          .text()
-          .trim();
-        const rating = $(element).find(walmartConfig.ratingSelector).text().trim();
-        const reviews = $(element).find(walmartConfig.reviewsSelector).text().trim();
-        const vendor = $(element).find(walmartConfig.vendorSelector).text().trim();
-        const badge = $(element).find(walmartConfig.badgeSelector).text().trim();
-        const image = $(element).find(walmartConfig.imageSelector).attr("src");
-        const availability = $(element).find(walmartConfig.availabilitySelector).text().trim();
-
-        if (name && price) {
-          products.push({
-            name,
-            price,
-            originalPrice,
-            rating,
-            reviews,
-            vendor,
-            badge,
-            image,
-            availability,
-            site: walmartConfig.siteName,
-          });
-        }
-      });
-    } catch (error) {
-      console.error(`Error scraping Walmart (page ${page}): ${error.message}`);
-    }
-  }
-  return products;
+// Puppeteer launch with ScraperAPI proxy
+const launchBrowser = async (url) => {
+  return puppeteer.launch({
+    headless: true,
+    args: [
+      `--proxy-server=`+url, // Replace with ScraperAPI's proxy URL
+    ],
+  });
 };
+
+// Function to scrape Walmart
+const scrapeWalmart = async (proxyUrl) => {
+  const browser = await launchBrowser(proxyUrl);
+  const page = await browser.newPage();
+
+  try {
+    // Use ScraperAPI to handle dynamic content
+    const scraperApiUrl = proxyUrl+"&render=true";
+
+    await page.goto(scraperApiUrl, { waitUntil: 'networkidle2' });
+
+    // Wait for products to load
+    await page.waitForSelector(walmartConfig.containerSelector);
+
+    // Extract product data
+    const products = await page.evaluate((config) => {
+      const productElements = document.querySelectorAll(config.containerSelector);
+      const extractedProducts = [];
+
+      productElements.forEach((product) => {
+        const name = product.querySelector(config.nameSelector)?.innerText.trim() || null;
+        const price = product.querySelector(config.priceSelector)?.innerText.trim() || null;
+        const rating = product.querySelector(config.ratingSelector)?.innerText.trim() || null;
+        const reviews = product.querySelector(config.reviewsSelector)?.innerText.trim() || null;
+        const image = product.querySelector(config.imageSelector)?.getAttribute('src') || null;
+
+        extractedProducts.push({
+          name,
+          price,
+          rating,
+          reviews,
+          image,
+        });
+      });
+
+      return extractedProducts;
+    }, walmartConfig);
+
+    console.log("Scraped Products:", products);
+
+    // Optionally, save the data to a file or database
+    // fs.writeFileSync('walmart_products.json', JSON.stringify(products, null, 2));
+
+  } catch (error) {
+    console.error("Error during scraping:", error.message);
+  } finally {
+    await browser.close();
+  }
+};
+// const scrapeWalmart = async (scraperApiKey) => {
+//   const walmartConfig = {
+//     siteName: "Walmart",
+//     url: "https://www.walmart.com/search/?query=laptop",
+//     containerSelector: "div.search-result-gridview-item",
+//     nameSelector: "a.product-title-link > span",
+//     priceSelector: "span.price-main > span.visuallyhidden",
+//     originalPriceSelector: "span.price-main > span.strike-through",
+//     ratingSelector: "span.stars-reviews-count > span",
+//     reviewsSelector: "span.stars-reviews-count > span:last-child",
+//     vendorSelector: "div.sold-by > span",
+//     badgeSelector: "div.badge > span",
+//     imageSelector: "div.search-result-productimage img",
+//     availabilitySelector: "div.search-result-availability",
+//     paginationParam: "&page=",
+//   };
+
+//   const products = [];
+//   for (let page = 1; page <= 5; page++) {
+//     const url = `${walmartConfig.url}${walmartConfig.paginationParam}${page}`;
+//     const proxyUrl = `http://api.scraperapi.com?api_key=${scraperApiKey}&url=${encodeURIComponent(
+//       url
+//     )}&render=${walmartConfig.render}`;
+
+//     try {
+//       const { data } = await axios.get(proxyUrl);
+//       const $ = cheerio.load(data);
+
+//       $(walmartConfig.containerSelector).each((_, element) => {
+//         const name = $(element).find(walmartConfig.nameSelector).text().trim();
+//         const price = $(element).find(walmartConfig.priceSelector).text().trim();
+//         const originalPrice = $(element)
+//           .find(walmartConfig.originalPriceSelector)
+//           .text()
+//           .trim();
+//         const rating = $(element).find(walmartConfig.ratingSelector).text().trim();
+//         const reviews = $(element).find(walmartConfig.reviewsSelector).text().trim();
+//         const vendor = $(element).find(walmartConfig.vendorSelector).text().trim();
+//         const badge = $(element).find(walmartConfig.badgeSelector).text().trim();
+//         const image = $(element).find(walmartConfig.imageSelector).attr("src");
+//         const availability = $(element).find(walmartConfig.availabilitySelector).text().trim();
+
+//         if (name && price) {
+//           products.push({
+//             name,
+//             price,
+//             originalPrice,
+//             rating,
+//             reviews,
+//             vendor,
+//             badge,
+//             image,
+//             availability,
+//             site: walmartConfig.siteName,
+//           });
+//         }
+//       });
+//     } catch (error) {
+//       console.error(`Error scraping Walmart (page ${page}): ${error.message}`);
+//     }
+//   }
+//   return products;
+// };
 
 
 
